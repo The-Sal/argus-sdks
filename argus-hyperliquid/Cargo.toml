@@ -1,0 +1,10 @@
+[package]
+name = "argus-hyperliquid"
+version = "0.1.0"
+edition = "2024"
+description = "Rust client for the Argus Hyperliquid perpetuals dispatcher."
+
+[dependencies]
+argus-dispatcher-core = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
