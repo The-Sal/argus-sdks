@@ -1,14 +1,15 @@
 /*
 
-Generic P1 wire-protocol client for Argus dispatchers. Handles the TCP connection, background
-I/O threading, and correlation-id request/response matching only — it has no exchange-specific
-types or actions. See the argus-hyperliquid and argus-lighter crates for typed clients built on
-top of `DispatcherConnection::request`.
+Generic wire-protocol client for Argus dispatchers. Handles the TCP connection, background I/O
+threading, correlation-id request/response matching, and streaming order books — it has no
+exchange-specific types or actions. See the argus-hyperliquid and argus-lighter crates for typed
+clients built on top of `DispatcherConnection`.
 
-Both the Hyperliquid and Lighter dispatchers are early-stage (read-only market data today), but
-this connection keeps the same two-thread architecture Polymarket's dispatcher client uses —
-including a buffer for unsolicited server pushes — so it doesn't need a rewrite once either
-dispatcher grows streaming/subscription actions.
+Both the Hyperliquid and Lighter dispatchers stream Protocol 2 order book snapshots to any
+connection that issues a `subscribe` request, on the same TCP socket as the Protocol 1
+request/response traffic. The connection keeps the same two-thread architecture Polymarket's
+dispatcher client uses: a reading thread that frames both protocols and a processing thread that
+routes responses, unsolicited pushes, and order book updates to their respective buffers/events.
 
 */
 
@@ -17,18 +18,21 @@ use std::net::TcpStream;
 use std::time::Duration;
 use std::io::{Read, Write};
 use serde::de::DeserializeOwned;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{spawn, JoinHandle};
 use event_listener::{Event, Listener};
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use crate::protocol::{InBoundMessage, OutBoundMessage, ProtocolFns};
+use crate::protocol::{
+    InBoundMessage, OrderBook, OutBoundMessage, ProtocolFns, ProtocolKind, SubscriptionResponse,
+    UnsubscriptionResponse,
+};
 
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Buffer of messages pushed by the dispatcher that were not solicited by a specific request
-/// (i.e. arrived without a `correlation_id`). Neither the Hyperliquid nor Lighter dispatcher
-/// pushes anything today, but the P1 protocol supports it and this keeps the plumbing ready.
+/// Buffer of Protocol 1 messages pushed by the dispatcher that were not solicited by a specific
+/// request (i.e. arrived without a `correlation_id`), such as notifications or fatal errors.
 #[derive(Debug)]
 pub struct PushedMessages {
     buffer: Vec<InBoundMessage>,
@@ -57,10 +61,11 @@ impl PushedMessages {
     }
 }
 
-/// A connection to an Argus dispatcher over its P1 TCP wire protocol.
+/// A connection to an Argus dispatcher over its TCP wire protocol.
 ///
 /// Construct with [`DispatcherConnection::new`], call [`start`](Self::start) once to spawn the
-/// background I/O threads, then issue requests with [`request`](Self::request).
+/// background I/O threads, then issue requests with [`request`](Self::request) and stream order
+/// books with [`subscribe`](Self::subscribe) + [`get_order_book`](Self::get_order_book).
 #[derive(Debug)]
 pub struct DispatcherConnection {
     read_stream_handle: Arc<RwLock<TcpStream>>,
@@ -69,6 +74,8 @@ pub struct DispatcherConnection {
     push_event: Arc<Event>,
     response_buf: Arc<RwLock<Vec<InBoundMessage>>>,
     response_event: Arc<Event>,
+    order_books: Arc<RwLock<HashMap<String, OrderBook>>>,
+    market_event: Arc<Event>,
 }
 
 impl DispatcherConnection {
@@ -89,13 +96,54 @@ impl DispatcherConnection {
             push_event: Arc::new(Event::new()),
             response_buf: Arc::new(Default::default()),
             response_event: Arc::new(Event::new()),
+            order_books: Arc::new(RwLock::new(HashMap::new())),
+            market_event: Arc::new(Event::new()),
         }
+    }
+
+    /// Returns a shared handle to the live order book map.
+    ///
+    /// The returned `Arc<RwLock<HashMap<String, OrderBook>>>` is backed by the same allocation
+    /// that the background processing thread writes to. Every Protocol 2 packet received from
+    /// the dispatcher overwrites the entry for that symbol in place, so a read lock taken at any
+    /// point will see the most recent snapshot available. Keys are the subscribed symbols:
+    /// Hyperliquid coins (e.g. `"BTC"`, `"xyz:AAPL"`) or Lighter symbols (e.g. `"BTC"`).
+    ///
+    /// Levels with no data behind them are zero-padded, so filter on `quantity > 0.0` when
+    /// iterating a side.
+    pub fn get_order_book(&self) -> Arc<RwLock<HashMap<String, OrderBook>>> {
+        self.order_books.clone()
+    }
+
+    /// Returns a shared handle to the market-data notification event.
+    ///
+    /// The background processing thread calls `notify(usize::MAX)` on this [`Event`] every time
+    /// a Protocol 2 order book packet is processed. Register a [`Listener`] *before* reading the
+    /// order book map to avoid missing updates between the read and the wait:
+    ///
+    /// ```no_run
+    /// use argus_dispatcher_core::{DispatcherConnection, Listener};
+    ///
+    /// # fn main() {
+    /// let conn = DispatcherConnection::new("localhost:9972");
+    /// let books = conn.get_order_book();
+    /// let event = conn.get_order_book_event();
+    ///
+    /// let listener = event.listen(); // register first
+    /// let snapshot = books.read().unwrap(); // then read
+    /// // ... use snapshot ...
+    /// drop(snapshot);
+    /// listener.wait(); // block until the next update arrives
+    /// # }
+    /// ```
+    pub fn get_order_book_event(&self) -> Arc<Event> {
+        self.market_event.clone()
     }
 
     /// Returns a shared handle to the buffer of unsolicited dispatcher pushes.
     ///
-    /// Empty and unused by both the Hyperliquid and Lighter dispatchers today — reserved for
-    /// when either grows push-style actions (account updates, streaming ticks, etc.).
+    /// Protocol 1 messages that arrive without a `correlation_id` (e.g. notifications or errors)
+    /// are buffered here; draining works the same as for Polymarket's system messages.
     pub fn get_pushed_messages(&self) -> Arc<RwLock<PushedMessages>> {
         self.pushed_messages.clone()
     }
@@ -108,11 +156,14 @@ impl DispatcherConnection {
     /// Spawns the background reading and processing threads and returns the reading thread's handle.
     ///
     /// Must be called once before any other method. Two threads are started:
-    /// - **Reading thread** — reads bytes into a rolling buffer, detects complete P1 packets by
-    ///   their terminator byte, and forwards them to the processing thread via a crossbeam channel.
-    /// - **Processing thread** — decodes each packet and decompresses it if needed. Packets that
-    ///   carry a `correlation_id` are placed in the response-matching buffer for [`request`](Self::request)
-    ///   to pick up; packets without one are treated as unsolicited pushes.
+    /// - **Reading thread** — reads bytes into a rolling buffer, detects complete packets by their
+    ///   terminator byte (`}` for Protocol 1, `L` for Protocol 2), validates them with
+    ///   [`ProtocolFns::analyse_bytes`], and forwards `(bytes, protocol)` to the processing thread
+    ///   via a crossbeam channel.
+    /// - **Processing thread** — routes each packet. Protocol 1 packets with a `correlation_id`
+    ///   are placed in the response-matching buffer for [`request`](Self::request) to pick up;
+    ///   Protocol 1 packets without one are treated as unsolicited pushes. Protocol 2 packets
+    ///   update the order book map and notify the market event.
     ///
     /// The returned `JoinHandle` belongs to the reading thread. The processing thread is detached.
     /// Both threads run indefinitely; the reading thread panics if the dispatcher closes the connection.
@@ -122,8 +173,13 @@ impl DispatcherConnection {
         let response_event_handle = Arc::clone(&self.response_event);
         let pushed_messages_handle = Arc::clone(&self.pushed_messages);
         let push_event_handle = Arc::clone(&self.push_event);
+        let order_books_handle = Arc::clone(&self.order_books);
+        let market_event_handle = Arc::clone(&self.market_event);
 
-        let (sender, receiver): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = unbounded();
+        let (sender, receiver): (
+            Sender<(Vec<u8>, ProtocolKind)>,
+            Receiver<(Vec<u8>, ProtocolKind)>,
+        ) = unbounded();
 
         // reading thread
         let handle = spawn(move || {
@@ -137,9 +193,12 @@ impl DispatcherConnection {
                         if bytes_read > 0 {
                             for byte in buffer[..bytes_read].iter() {
                                 full_packet_buffer.push(*byte);
-                                if *byte == 0x7D && ProtocolFns::analyse_bytes(&full_packet_buffer).is_ok() {
+                                if (*byte == 0x4C || *byte == 0x7D)
+                                    && let Ok(protocol_kind) =
+                                        ProtocolFns::analyse_bytes(&full_packet_buffer)
+                                {
                                     sender
-                                        .send(full_packet_buffer.clone())
+                                        .send((full_packet_buffer.clone(), protocol_kind))
                                         .expect("Failed to send data to processing thread");
                                     full_packet_buffer.clear();
                                 }
@@ -158,22 +217,36 @@ impl DispatcherConnection {
 
         // processing thread
         spawn(move || {
-            while let Ok(packet) = receiver.recv() {
-                let mut decoded = ProtocolFns::protocol_1_decoder(&packet);
-                ProtocolFns::maybe_decompress_p1(&mut decoded);
+            while let Ok((packet, protocol_kind)) = receiver.recv() {
+                match protocol_kind {
+                    ProtocolKind::Protocol1 => {
+                        let mut decoded = ProtocolFns::protocol_1_decoder(&packet);
+                        ProtocolFns::maybe_decompress_p1(&mut decoded);
 
-                if decoded.correlation_id.is_some() {
-                    response_buf_handle
-                        .write()
-                        .expect("Failed to lock response buffer for writing")
-                        .push(decoded);
-                    response_event_handle.notify(usize::MAX);
-                } else {
-                    pushed_messages_handle
-                        .write()
-                        .expect("Failed to lock pushed messages buffer for writing")
-                        .add_message(decoded);
-                    push_event_handle.notify(usize::MAX);
+                        if decoded.correlation_id.is_some() {
+                            response_buf_handle
+                                .write()
+                                .expect("Failed to lock response buffer for writing")
+                                .push(decoded);
+                            response_event_handle.notify(usize::MAX);
+                        } else {
+                            pushed_messages_handle
+                                .write()
+                                .expect("Failed to lock pushed messages buffer for writing")
+                                .add_message(decoded);
+                            push_event_handle.notify(usize::MAX);
+                        }
+                    }
+                    ProtocolKind::Protocol2 => {
+                        let order_book = ProtocolFns::bytes_to_orderbook(&packet, None);
+                        {
+                            let mut order_books = order_books_handle
+                                .write()
+                                .expect("Failed to lock order books for writing");
+                            order_books.insert(order_book.symbol.clone(), order_book);
+                        }
+                        market_event_handle.notify(usize::MAX);
+                    }
                 }
             }
         });
@@ -267,5 +340,32 @@ impl DispatcherConnection {
 
         serde_json::from_value(response.data)
             .map_err(|e| format!("Failed to parse response for action '{}': {}", action, e))
+    }
+
+    /// Subscribes this connection to a set of instruments and blocks until the dispatcher confirms.
+    ///
+    /// `instruments` are the dispatcher-side keys: Hyperliquid coins (e.g. `"BTC"`, `"xyz:AAPL"`)
+    /// or Lighter symbols (e.g. `"BTC"`). The dispatcher takes a JSON array in one `subscribe`
+    /// request, so pass every instrument you want in a single call. Returns a
+    /// [`SubscriptionResponse`] listing the instruments that were registered and any that failed
+    /// (unknown instruments land in `failed` without failing the whole request).
+    ///
+    /// After a successful subscription the dispatcher streams Protocol 2 order book packets for
+    /// these instruments; look them up in the map from [`get_order_book`](Self::get_order_book)
+    /// keyed by the same instrument string, and await updates on the event from
+    /// [`get_order_book_event`](Self::get_order_book_event).
+    pub fn subscribe(&self, instruments: &[&str]) -> Result<SubscriptionResponse, String> {
+        self.request("subscribe", serde_json::json!(instruments), None)
+            .map_err(|e| format!("Failed to get subscription confirmation: {}", e))
+    }
+
+    /// Unsubscribes this connection from a set of instruments and blocks until the dispatcher confirms.
+    ///
+    /// Returns an [`UnsubscriptionResponse`] listing the instruments that were removed and any
+    /// that failed. Any order book entries already in the map from
+    /// [`get_order_book`](Self::get_order_book) are left in place (stale) rather than removed.
+    pub fn unsubscribe(&self, instruments: &[&str]) -> Result<UnsubscriptionResponse, String> {
+        self.request("unsubscribe", serde_json::json!(instruments), None)
+            .map_err(|e| format!("Failed to get unsubscription confirmation: {}", e))
     }
 }

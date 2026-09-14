@@ -75,13 +75,84 @@ fn test_get_funding_rates_for_all_perpetuals() {
 #[ignore]
 fn test_perpetual_info() {
     let client = connect();
-    let perps = client.get_perpetuals_for_dex("", 0, None).unwrap();
+
+    // Default-dex coins have no annotation (Hyperliquid returns `null` for `perpAnnotation`,
+    // which the dispatcher must treat as "no data" rather than an error), but they do have
+    // predicted funding. Regression test for the dispatcher's `_post(..., allow_null=True)` fix.
+    let info = client.perpetual_info("BTC").unwrap();
+    assert_eq!(info.coin, "BTC");
+    assert!(
+        info.annotation.is_none(),
+        "default-dex coins have no annotation"
+    );
+
+    // HIP-3 (builder-deployed) coins are the opposite: they have annotation metadata, and no
+    // predicted funding. Use a HIP-3 coin so this exercises the annotation path, mirroring
+    // test_get_perpetuals_hip3_dex.
+    let dexes = client.get_dexs().unwrap();
+    let Some(dex) = dexes.first() else {
+        eprintln!("skipped HIP-3 checks: no HIP-3 dexes registered");
+        return;
+    };
+    let perps = client.get_perpetuals_for_dex(&dex.name, 0, Some(1)).unwrap();
     let coin = perps
         .first()
-        .expect("expected at least one perpetual to test perpetual_info with")
+        .expect("expected at least one perpetual in the HIP-3 dex")
         .asset
         .name
         .clone();
     let info = client.perpetual_info(&coin).unwrap();
     assert_eq!(info.coin, coin);
+    assert!(
+        info.annotation.is_some() || info.category.is_some() || info.concise_annotation.is_some(),
+        "expected some annotation metadata for HIP-3 coin {coin}"
+    );
+}
+
+#[test]
+#[ignore]
+fn test_subscribe_and_stream_order_book() {
+    use crate::Listener;
+
+    let client = connect();
+    let subscription = client.subscribe(&["BTC"]).unwrap();
+    assert!(
+        subscription.failed.is_empty(),
+        "subscribe failed for: {:?}",
+        subscription.failed
+    );
+    assert!(subscription.subscribed.iter().any(|coin| coin == "BTC"));
+
+    let books = client.get_order_book();
+    let event = client.get_order_book_event();
+
+    // The market event fires for every Protocol 2 packet, so poll until the BTC book has a real
+    // (non zero-padded) level rather than assuming the first notification is the one we want.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let best_ask = loop {
+        let listener = event.listen();
+        {
+            let snapshot = books.read().unwrap();
+            if let Some(book) = snapshot.get("BTC")
+                && let Some(ask) = book.asks.iter().find(|order| order.quantity > 0.0)
+            {
+                break ask.price;
+            }
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(
+            remaining.as_millis() > 0,
+            "timed out waiting for a BTC order book update"
+        );
+        listener.wait_timeout(remaining);
+    };
+    assert!(best_ask > 0.0, "expected a positive best ask, got {}", best_ask);
+
+    let unsubscription = client.unsubscribe(&["BTC"]).unwrap();
+    assert!(
+        unsubscription.failed.is_empty(),
+        "unsubscribe failed for: {:?}",
+        unsubscription.failed
+    );
+    assert!(unsubscription.unsubscribed.iter().any(|coin| coin == "BTC"));
 }

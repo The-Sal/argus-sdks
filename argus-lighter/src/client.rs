@@ -9,11 +9,20 @@ in the Argus repo). This coverage is expected to grow as the dispatcher does.
 Unlike Hyperliquid, Lighter has no HIP-3-style builder-deployed dexes — it is a single unified
 exchange, so there is no `dex_name` parameter anywhere in this client.
 
+Streaming is supported via the dispatcher's `subscribe`/`unsubscribe` actions: after subscribing
+to symbols, the dispatcher pushes Protocol 2 order book snapshots on the same TCP connection.
+See [`LighterClient::get_order_book`] and [`LighterClient::get_order_book_event`].
+
 */
 
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use serde_json::json;
 use serde::Deserialize;
-use argus_dispatcher_core::DispatcherConnection;
+use argus_dispatcher_core::{
+    DispatcherConnection, Event, OrderBook, PushedMessages, SubscriptionResponse,
+    UnsubscriptionResponse,
+};
 use crate::models::{FundingHistoryEntry, Perpetual, ProductsVersion};
 
 
@@ -118,5 +127,78 @@ impl LighterClient {
         }
         let response: Response = self.conn.request("get_funding_history", data, None)?;
         Ok(response.funding_history)
+    }
+
+    /// Subscribes to order book streaming for one or more markets and blocks until the dispatcher
+    /// confirms (up to the default 10 second timeout).
+    ///
+    /// `symbols` are Lighter market symbols (e.g. `["BTC", "ETH"]`). Returns a
+    /// [`SubscriptionResponse`] listing the symbols that were registered and any that failed —
+    /// an unknown symbol lands in `failed` without failing the whole request.
+    ///
+    /// After a successful subscription the dispatcher streams Protocol 2 order book snapshots
+    /// for these symbols. Register a listener on [`get_order_book_event`](Self::get_order_book_event)
+    /// *before* reading the map from [`get_order_book`](Self::get_order_book), then wait on the
+    /// listener to be woken on each update.
+    pub fn subscribe(&self, symbols: &[&str]) -> Result<SubscriptionResponse, String> {
+        self.conn.subscribe(symbols)
+    }
+
+    /// Unsubscribes from order book streaming for one or more markets and blocks until the
+    /// dispatcher confirms.
+    ///
+    /// Returns an [`UnsubscriptionResponse`] listing the symbols that were removed and any that
+    /// failed. Any order book entries already in the map from
+    /// [`get_order_book`](Self::get_order_book) are left in place (stale) rather than removed.
+    pub fn unsubscribe(&self, symbols: &[&str]) -> Result<UnsubscriptionResponse, String> {
+        self.conn.unsubscribe(symbols)
+    }
+
+    /// Returns a shared handle to the live order book map.
+    ///
+    /// Populated by Protocol 2 packets for symbols subscribed via [`subscribe`](Self::subscribe)
+    /// and keyed by the same symbol string. Every packet overwrites the entry for that symbol in
+    /// place, so a read lock always sees the most recent snapshot. Levels the exchange did not
+    /// send are zero-padded — filter on `quantity > 0.0` when iterating a side.
+    pub fn get_order_book(&self) -> Arc<RwLock<HashMap<String, OrderBook>>> {
+        self.conn.get_order_book()
+    }
+
+    /// Returns a shared handle to the order book notification event.
+    ///
+    /// The background processing thread notifies this [`Event`] on every Protocol 2 packet.
+    /// Register a listener *before* reading [`get_order_book`](Self::get_order_book):
+    ///
+    /// ```no_run
+    /// use argus_lighter::{LighterClient, Listener};
+    ///
+    /// # fn main() {
+    /// let client = LighterClient::connect("localhost:9974");
+    /// let books = client.get_order_book();
+    /// let event = client.get_order_book_event();
+    ///
+    /// let listener = event.listen();          // register first
+    /// let snapshot = books.read().unwrap();   // then read
+    /// // ... use snapshot ...
+    /// drop(snapshot);
+    /// listener.wait();                        // block until the next update
+    /// # }
+    /// ```
+    ///
+    /// Note the event fires for *every* symbol, not just the one you care about — re-check your
+    /// symbol in the map after each wakeup.
+    pub fn get_order_book_event(&self) -> Arc<Event> {
+        self.conn.get_order_book_event()
+    }
+
+    /// Returns a shared handle to the buffer of unsolicited Protocol 1 pushes from the dispatcher
+    /// (e.g. notifications or fatal errors), drained via [`PushedMessages::drain`].
+    pub fn get_pushed_messages(&self) -> Arc<RwLock<PushedMessages>> {
+        self.conn.get_pushed_messages()
+    }
+
+    /// Returns a shared handle to the event notified whenever an unsolicited Protocol 1 push arrives.
+    pub fn get_push_event(&self) -> Arc<Event> {
+        self.conn.get_push_event()
     }
 }

@@ -110,26 +110,167 @@ pub struct InBoundMessage {
     pub correlation_id: Option<String>,
 }
 
+/// Response to a `subscribe` request: which symbols were registered and which were rejected.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SubscriptionResponse {
+    pub subscribed: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// Response to an `unsubscribe` request: which symbols were removed and which were not.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UnsubscriptionResponse {
+    pub unsubscribed: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// One price level of an order book.
+#[derive(Debug, Clone)]
+pub struct Order {
+    pub price: f64,
+    pub quantity: f64,
+}
+
+/// A point-in-time Protocol 2 order book snapshot for one symbol.
+#[derive(Debug, Clone)]
+pub struct OrderBook {
+    pub symbol: String,
+    pub bids: Vec<Order>,
+    pub asks: Vec<Order>,
+    pub remote_timestamp: f64,
+    pub argus_timestamp: f64,
+}
+
+impl OrderBook {
+    /// Prints a formatted side-by-side view of the order book to stdout.
+    ///
+    /// Bids are shown on the left and asks on the right, both sorted best-first. Column widths are
+    /// computed from the actual data so the output aligns cleanly regardless of price/quantity
+    /// magnitude. Prints nothing but the header if both sides are empty.
+    pub fn print_orderbook(&self) {
+        use std::fmt::Write;
+        let mut out = String::with_capacity(4096);
+
+        let _ = writeln!(out, "Order Book for symbol: {}", self.symbol);
+
+        if self.bids.is_empty() && self.asks.is_empty() {
+            print!("{out}");
+            return;
+        }
+
+        let bid_index_width = self.bids.len().to_string().len();
+        let ask_index_width = self.asks.len().to_string().len();
+
+        let mut bids = Vec::with_capacity(self.bids.len());
+        let mut asks = Vec::with_capacity(self.asks.len());
+
+        let mut max_bid_price = 0;
+        let mut max_bid_qty = 0;
+        let mut max_ask_price = 0;
+        let mut max_ask_qty = 0;
+
+        for o in &self.bids {
+            let p = format!("{:.2}", o.price);
+            let q = format!("{:.2}", o.quantity);
+            max_bid_price = max_bid_price.max(p.len());
+            max_bid_qty = max_bid_qty.max(q.len());
+            bids.push((p, q));
+        }
+
+        for o in &self.asks {
+            let p = format!("{:.2}", o.price);
+            let q = format!("{:.2}", o.quantity);
+            max_ask_price = max_ask_price.max(p.len());
+            max_ask_qty = max_ask_qty.max(q.len());
+            asks.push((p, q));
+        }
+
+        let bid_empty_len = "Bid ".len()
+            + bid_index_width
+            + ": Price: ".len()
+            + max_bid_price
+            + ", Quantity: ".len()
+            + max_bid_qty;
+
+        let ask_empty_len = "Ask ".len()
+            + ask_index_width
+            + ": Price: ".len()
+            + max_ask_price
+            + ", Quantity: ".len()
+            + max_ask_qty;
+
+        let bid_empty = " ".repeat(bid_empty_len);
+        let ask_empty = " ".repeat(ask_empty_len);
+
+        let rows = bids.len().max(asks.len());
+        for i in 0..rows {
+            if let Some((p, q)) = bids.get(i) {
+                let _ = write!(
+                    out,
+                    "Bid {:>idx$}: Price: {:>pw$}, Quantity: {:>qw$}",
+                    i + 1,
+                    p,
+                    q,
+                    idx = bid_index_width,
+                    pw = max_bid_price,
+                    qw = max_bid_qty,
+                );
+            } else {
+                out.push_str(&bid_empty);
+            }
+
+            out.push_str(" | ");
+
+            if let Some((p, q)) = asks.get(i) {
+                let _ = write!(
+                    out,
+                    "Ask {:>idx$}: Price: {:>pw$}, Quantity: {:>qw$}",
+                    i + 1,
+                    p,
+                    q,
+                    idx = ask_index_width,
+                    pw = max_ask_price,
+                    qw = max_ask_qty,
+                );
+            } else {
+                out.push_str(&ask_empty);
+            }
+
+            out.push('\n');
+        }
+
+        print!("{out}");
+    }
+}
+
 /// Which wire protocol a packet belongs to.
 ///
-/// Only `Protocol1` (JSON request/response and push messages) is implemented today, since
-/// neither the Hyperliquid nor Lighter dispatcher streams anything else yet. This is a
-/// dedicated enum (rather than a bare `()`) so a future binary/streaming protocol — mirroring
-/// Polymarket's Protocol 2 order-book feed — can be added as another variant without breaking
-/// callers that match on it.
+/// `Protocol1` carries JSON request/response and push messages (`~NNNN|{...}`). `Protocol2`
+/// carries compact binary order book snapshots (`~NNNNMMMM|<symbol><values>L`) pushed
+/// unsolicited after a `subscribe` request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolKind {
     Protocol1,
+    Protocol2,
+}
+
+/// Intermediate representation of a Protocol 2 packet: the symbol plus its raw numeric values.
+#[derive(Debug)]
+pub struct Protocol2IR {
+    pub symbol: String,
+    pub values: Vec<f64>,
 }
 
 pub struct ProtocolFns;
 
 impl ProtocolFns {
-    /// Inspects a raw byte slice and confirms it is a well-formed Protocol 1 packet.
+    /// Inspects a raw byte slice and determines which wire protocol it belongs to.
     ///
-    /// Returns `Ok(ProtocolKind::Protocol1)` for a complete `~NNNN|{...}` packet, or `Err` if
-    /// the packet is too short, has an invalid header byte, or fails structural checks. Called
-    /// by the reading thread on each candidate packet before it is forwarded for decoding.
+    /// Returns `Ok(ProtocolKind::Protocol1)` for JSON message packets (`~NNNN|{...}`) or
+    /// `Ok(ProtocolKind::Protocol2)` for order book packets (`~NNNNMMMM|<symbol><values>L`).
+    /// Returns `Err` if the packet is too short, has an invalid header byte, or fails the
+    /// per-protocol structural checks. Called by the reading thread on each candidate packet
+    /// before it is forwarded for decoding.
     pub fn analyse_bytes(bytes: &[u8]) -> Result<ProtocolKind, String> {
         if bytes.len() < 6 {
             return Err(format!(
@@ -138,6 +279,7 @@ impl ProtocolFns {
             ));
         }
 
+        let raw_kind;
         let header = &bytes[0..5];
 
         if header[0] != 0x7E {
@@ -161,28 +303,48 @@ impl ProtocolFns {
             ));
         }
 
-        if bytes[5] != 0x7C {
-            return Err(format!(
-                "Invalid packet: expected byte after length header to be 0x7C, got 0x{:02X}",
-                bytes[5]
-            ));
+        if bytes[5] == 0x7C {
+            raw_kind = ProtocolKind::Protocol1;
+        } else {
+            raw_kind = ProtocolKind::Protocol2;
         }
 
-        if bytes[6] != 0x7B {
-            return Err(format!(
-                "Invalid packet: expected byte after pipe to be 0x7B, got 0x{:02X}",
-                bytes[6]
-            ));
-        }
+        match raw_kind {
+            ProtocolKind::Protocol1 => {
+                if bytes[6] != 0x7B {
+                    return Err(format!(
+                        "Invalid packet for protocol 1: expected byte after pipe to be 0x7B, got 0x{:02X}",
+                        bytes[6]
+                    ));
+                }
 
-        if bytes[bytes.len() - 1] != 0x7D {
-            return Err(format!(
-                "Invalid packet: expected last byte to be 0x7D, got 0x{:02X}",
-                bytes[bytes.len() - 1]
-            ));
-        }
+                if bytes[bytes.len() - 1] != 0x7D {
+                    return Err(format!(
+                        "Invalid packet for protocol 1: expected last byte to be 0x7D, got 0x{:02X}",
+                        bytes[bytes.len() - 1]
+                    ));
+                }
 
-        Ok(ProtocolKind::Protocol1)
+                Ok(ProtocolKind::Protocol1)
+            }
+            ProtocolKind::Protocol2 => {
+                if bytes[9] != 0x7C {
+                    return Err(format!(
+                        "Invalid packet for protocol 2: expected byte after symbol length to be 0x7C, got 0x{:02X}",
+                        bytes[9]
+                    ));
+                }
+
+                if bytes[bytes.len() - 1] != 0x4C {
+                    return Err(format!(
+                        "Invalid packet for protocol 2: expected last byte to be 0x4C, got 0x{:02X}",
+                        bytes[bytes.len() - 1]
+                    ));
+                }
+
+                Ok(ProtocolKind::Protocol2)
+            }
+        }
     }
 
     /// Serializes an [`OutBoundMessage`] into Protocol 1 wire bytes.
@@ -241,6 +403,121 @@ impl ProtocolFns {
         if let Ok(json_value) = serde_json::from_str(&decompressed) {
             msg.data = json_value;
             msg.compressed = Some(false);
+        }
+    }
+
+    /// Decodes a Protocol 2 packet into its intermediate representation.
+    ///
+    /// Strips framing bytes, extracts the symbol string and the trailing comma-separated float
+    /// values (bids, asks, timestamps) using `fast_float` for performance. Returns an owned
+    /// [`Protocol2IR`] with the raw `Vec<f64>`. The caller must know the value layout to
+    /// interpret the slice; prefer [`bytes_to_orderbook`] which handles the layout automatically.
+    /// Uses `unsafe` `from_utf8_unchecked` on the inner content — safe because Argus only
+    /// encodes ASCII.
+    pub fn protocol_2_decoder(message_bytes: &[u8]) -> Result<Protocol2IR, String> {
+        if message_bytes[message_bytes.len() - 1] != 0x4C {
+            Err(format!(
+                "Invalid packet for protocol 2: expected last byte to be 0x4C, got 0x{:02X}",
+                message_bytes[message_bytes.len() - 1]
+            ))?;
+        }
+
+        let inner_content = &message_bytes[5..message_bytes.len() - 1];
+        let inner_content_str: &str;
+
+        // SAFETY: Argus only encodes ASCII
+        unsafe {
+            inner_content_str = std::str::from_utf8_unchecked(inner_content);
+        }
+
+        let symbol_length: usize = inner_content_str[0..4]
+            .parse()
+            .expect("Failed to parse symbol length");
+        let symbol = &inner_content_str[5..5 + symbol_length];
+        let message_body = &inner_content_str[5 + symbol_length..];
+
+        let mut working_buff = String::new();
+        let mut parsed_values: Vec<f64> = Vec::new();
+
+        for c in message_body.chars() {
+            if c == ',' {
+                let value: f64 = fast_float::parse(working_buff.as_str())
+                    .expect(format!("Failed to parse value: {}", working_buff).as_str());
+                parsed_values.push(value);
+                working_buff.clear();
+            } else {
+                working_buff.push(c);
+            }
+        }
+
+        if !working_buff.is_empty() {
+            let value: f64 = fast_float::parse(working_buff.as_str())
+                .expect(format!("Failed to parse value: {}", working_buff).as_str());
+            parsed_values.push(value);
+        }
+
+        Ok(Protocol2IR {
+            symbol: symbol.to_string(),
+            values: parsed_values,
+        })
+    }
+
+    /// Decodes a Protocol 2 packet directly into an [`OrderBook`].
+    ///
+    /// Calls [`protocol_2_decoder`] and interprets the resulting float slice as interleaved
+    /// (price, quantity) pairs: the first half is bids, the second half is asks, with the last
+    /// two values being the exchange timestamp (`remote_timestamp`) and the Argus timestamp
+    /// (`argus_timestamp`). `depth` controls how many levels to read from each side; defaults
+    /// to 10 if `None`. Panics if the packet contains fewer values than `depth * 2` per side.
+    /// Returns an owned `OrderBook` — this is a point-in-time snapshot, not a live handle.
+    pub fn bytes_to_orderbook(message_bytes: &[u8], depth: Option<usize>) -> OrderBook {
+        let depth = depth.unwrap_or(10);
+        let ir = ProtocolFns::protocol_2_decoder(message_bytes)
+            .expect("Failed to decode protocol 2 message");
+
+        let argus_timestamp = ir.values[ir.values.len() - 1];
+        let remote_timestamp = ir.values[ir.values.len() - 2];
+        let values_without_timestamps = &ir.values[0..ir.values.len() - 2];
+
+        let mut bids: Vec<Order> = Vec::new();
+        let mut asks: Vec<Order> = Vec::new();
+
+        let split_index = values_without_timestamps.len() / 2;
+
+        if split_index < depth {
+            panic!(
+                "Not enough values in the message to fill the orderbook depth, expected at least {}, got {}",
+                depth * 2,
+                ir.values.len()
+            );
+        }
+
+        let bid_values = &values_without_timestamps[0..split_index];
+        let ask_values = &values_without_timestamps[split_index..];
+
+        for i in 0..depth {
+            let bid_price = bid_values[i * 2];
+            let bid_quantity = bid_values[i * 2 + 1];
+            let ask_price = ask_values[i * 2];
+            let ask_quantity = ask_values[i * 2 + 1];
+
+            bids.push(Order {
+                price: bid_price,
+                quantity: bid_quantity,
+            });
+
+            asks.push(Order {
+                price: ask_price,
+                quantity: ask_quantity,
+            });
+        }
+
+        OrderBook {
+            symbol: ir.symbol,
+            bids,
+            asks,
+            remote_timestamp,
+            argus_timestamp,
         }
     }
 }

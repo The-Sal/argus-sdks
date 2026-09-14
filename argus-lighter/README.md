@@ -11,13 +11,15 @@ proxies Lighter's (zkLighter) public REST API over a persistent TCP connection.
 Your code  ←→  argus-lighter  ←→  Argus Lighter dispatcher  ←→  Lighter
 ```
 
-This crate handles the P1 TCP wire protocol and background I/O thread, and exposes a clean
-synchronous, fully-typed API. It's built on [`argus-dispatcher-core`](../argus-dispatcher-core),
-the transport layer shared with [`argus-hyperliquid`](../argus-hyperliquid).
+This crate handles the P1 (JSON request/response) and P2 (order book streaming) TCP wire
+protocols and background I/O threads, and exposes a clean synchronous, fully-typed API. It's
+built on [`argus-dispatcher-core`](../argus-dispatcher-core), the transport layer shared with
+[`argus-hyperliquid`](../argus-hyperliquid).
 
-The Lighter dispatcher is early-stage (Argus "Phase 1.0 of v2") and currently exposes only
-read-only, unauthenticated market-data actions — no trading or account queries yet. This crate's
-coverage mirrors the dispatcher's routing table exactly and will grow alongside it.
+The Lighter dispatcher is early-stage (Argus "Phase 1.0 of v2") and currently exposes read-only,
+unauthenticated market-data actions plus order book streaming — no trading or account queries
+yet. This crate's coverage mirrors the dispatcher's routing table exactly and will grow alongside
+it.
 
 Unlike Hyperliquid, Lighter has no HIP-3-style builder-deployed dexes — it's a single unified
 exchange with one flat market list, so there's no `dex_name` parameter anywhere in this crate.
@@ -71,6 +73,82 @@ let client = LighterClient::connect("localhost:9974"); // blocks until connected
 - `get_funding_history(market_id: i64, start_timestamp: i64, end_timestamp: Option<i64>, resolution: Option<&str>) -> Result<Vec<FundingHistoryEntry>, String>` —
   historical funding for one market. `start_timestamp`/`end_timestamp` are unix seconds;
   `resolution` defaults to `"1h"`.
+- `subscribe(symbols: &[&str]) -> Result<SubscriptionResponse, String>` — subscribes to streaming
+  order books for one or more markets. Unknown symbols land in `failed` without failing the
+  request.
+- `unsubscribe(symbols: &[&str]) -> Result<UnsubscriptionResponse, String>` — stops streaming for
+  the given markets.
+- `get_order_book() -> Arc<RwLock<HashMap<String, OrderBook>>>` — live order book map, keyed by
+  market symbol, updated in place by each Protocol 2 packet.
+- `get_order_book_event() -> Arc<Event>` — event notified on every Protocol 2 packet.
+- `get_pushed_messages() -> Arc<RwLock<PushedMessages>>` / `get_push_event() -> Arc<Event>` —
+  unsolicited Protocol 1 pushes from the dispatcher (notifications, fatal errors).
+
+## Streaming
+
+Subscriptions are per-connection and take a batch of Lighter market symbols (`"BTC"`, `"ETH"`).
+The dispatcher then pushes Protocol 2 order book snapshots over the same TCP connection, which
+the background thread applies to a shared map and announces via an [`Event`].
+
+```rust
+use argus_lighter::{LighterClient, Listener};
+
+fn main() {
+    let client = LighterClient::connect("localhost:9974");
+
+    let subscription = client.subscribe(&["BTC", "ETH"]).unwrap();
+    assert!(subscription.failed.is_empty(), "failed: {:?}", subscription.failed);
+    println!("subscribed: {:?}", subscription.subscribed);
+
+    let books = client.get_order_book();
+    let event = client.get_order_book_event();
+
+    loop {
+        let listener = event.listen();               // register before reading
+        {
+            let snapshot = books.read().unwrap();
+            if let Some(book) = snapshot.get("BTC") {
+                let best_bid = book.bids.iter().find(|o| o.quantity > 0.0);
+                let best_ask = book.asks.iter().find(|o| o.quantity > 0.0);
+                println!("BTC bid={:?} ask={:?}", best_bid, best_ask);
+            }
+        }
+        listener.wait();                             // block until the next update
+    }
+}
+```
+
+Notes:
+
+- Register the listener **before** reading the map, otherwise an update arriving between the read
+  and the wait is missed (the listener only wakes on notifications that happen after it is
+  registered).
+- The event fires for **every** subscribed symbol, not just the one you care about — re-check your
+  symbol in the map after each wakeup.
+- Missing levels are zero-padded to the dispatcher's configured depth (10 by default), so filter
+  with `quantity > 0.0` when iterating a side.
+- On unsubscribe, entries already in the map are left in place (stale) rather than removed.
+- `OrderBook.remote_timestamp` is the exchange timestamp in milliseconds; `argus_timestamp` is
+  the Argus server timestamp in fractional Unix seconds.
+
+### `OrderBook`
+
+```rust
+pub struct Order {
+    pub price: f64,
+    pub quantity: f64,
+}
+
+pub struct OrderBook {
+    pub symbol: String,
+    pub bids: Vec<Order>,        // best-first, zero-padded to depth
+    pub asks: Vec<Order>,        // best-first, zero-padded to depth
+    pub remote_timestamp: f64,   // exchange time, ms
+    pub argus_timestamp: f64,    // Argus time, fractional seconds
+}
+
+book.print_orderbook();          // formatted side-by-side dump to stdout
+```
 
 ### `Perpetual`
 

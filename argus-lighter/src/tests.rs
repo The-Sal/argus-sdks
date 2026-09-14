@@ -86,3 +86,51 @@ fn test_get_funding_history() {
         assert!(entry.direction == "long" || entry.direction == "short");
     }
 }
+
+#[test]
+#[ignore]
+fn test_subscribe_and_stream_order_book() {
+    use crate::Listener;
+
+    let client = connect();
+    let subscription = client.subscribe(&["BTC"]).unwrap();
+    assert!(
+        subscription.failed.is_empty(),
+        "subscribe failed for: {:?}",
+        subscription.failed
+    );
+    assert!(subscription.subscribed.iter().any(|symbol| symbol == "BTC"));
+
+    let books = client.get_order_book();
+    let event = client.get_order_book_event();
+
+    // The market event fires for every Protocol 2 packet, so poll until the BTC book has a real
+    // (non zero-padded) level rather than assuming the first notification is the one we want.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let best_ask = loop {
+        let listener = event.listen();
+        {
+            let snapshot = books.read().unwrap();
+            if let Some(book) = snapshot.get("BTC")
+                && let Some(ask) = book.asks.iter().find(|order| order.quantity > 0.0)
+            {
+                break ask.price;
+            }
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(
+            remaining.as_millis() > 0,
+            "timed out waiting for a BTC order book update"
+        );
+        listener.wait_timeout(remaining);
+    };
+    assert!(best_ask > 0.0, "expected a positive best ask, got {}", best_ask);
+
+    let unsubscription = client.unsubscribe(&["BTC"]).unwrap();
+    assert!(
+        unsubscription.failed.is_empty(),
+        "unsubscribe failed for: {:?}",
+        unsubscription.failed
+    );
+    assert!(unsubscription.unsubscribed.iter().any(|symbol| symbol == "BTC"));
+}
