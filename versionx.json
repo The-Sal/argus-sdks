@@ -1,0 +1,395 @@
+{
+  "symbols_map": {
+    "test_get_perpetuals_default_dex": [
+      "40442c96b1593e7f0c02ce1306036dd1b00cbb367973fff5eea813e342ec0ae6",
+      "function"
+    ],
+    "test_subscribe_and_stream_order_book": [
+      "43137316577c1515c49a645a9953d535ee692d873ba94987218db3a26ba0ba70",
+      "function"
+    ],
+    "HyperliquidClient::perpetual_info": [
+      "2aa53efd3c4e6999296fd03cfccdb5b10eaf32fbad60ec3af0c6ce1a50147483",
+      "method"
+    ],
+    "OutBoundMessage::new": [
+      "8ceec77265f5b59349cd8e822f99830bc00ecf762a1d69d70b318580cc5a7f64",
+      "method"
+    ],
+    "Protocol2IR": [
+      "1b797bff5c7e1a343a8f9f810d2f4ab7a3c5cc524b65bccdd547a672c70d9413",
+      "struct"
+    ],
+    "HyperliquidClient::subscribe": [
+      "626969691e80f210ffef4df801e40401b90bbb1e1a4f49b6efa986f51a72ce78",
+      "method"
+    ],
+    "PredictedFundingVenue": [
+      "6cf21c3b545b6db55c06adf2651249858c1bd4c369325f8dee3a37440ae497b6",
+      "struct"
+    ],
+    "test_market_info": [
+      "d9e01f3729511f8a5c71896b0fea82d7d7db983fd59632e2c8568487ff01deb4",
+      "function"
+    ],
+    "Asset": [
+      "0024c0118802ae62546a9c5cf137f715352bdbc29b15f0bdc91d480d4e3b1a43",
+      "struct"
+    ],
+    "DispatcherConnection::get_order_book": [
+      "bfa81d3dea5658032bd6f1f1453cfa45ac5de3187c410d8ffc9d158bdb7d8990",
+      "method"
+    ],
+    "DispatcherConnection::wait_for_response": [
+      "1a5b116a6402cefe3169774df67117b8e7e2acaa5800c9d74a71f81e4f7c1a37",
+      "method"
+    ],
+    "Perpetual::open_interest_usd": [
+      "206e034c1ecb27a13c65af8a1a0fa1be90dc34bd81f8bc7b3979ce310dc7603e",
+      "method"
+    ],
+    "test_get_perpetuals_hip3_dex": [
+      "b5f7003d9ff955e62098a41e6eb2065a66838bf02d5f3aaa58f1e22c2f17c361",
+      "function"
+    ],
+    "ProtocolFns::protocol_1_decoder": [
+      "d215c8ec6031d7fe32228fedf0d4c3376adf2bb985809c56c83ecf43e522f6d3",
+      "method"
+    ],
+    "DispatcherConnection::send_message": [
+      "83c32eabc35409623b12920db11535ac5a4c3be7cd47b4ad5c994c0859dc453d",
+      "method"
+    ],
+    "ProductsVersion": [
+      "2c74dbb6d51780dd0e33d3a37566b5abfec1a6356f76d435f6caa6535d8aaeb6",
+      "struct"
+    ],
+    "ProtocolFns::protocol_2_decoder": [
+      "22bf6fbce3b85909659692d0fe0c1501d4a571740d934ca75e136cc111497778",
+      "method"
+    ],
+    "connect": [
+      "1d4c6e9e9491180ad2b706bcbdb7880e966f61bfcb1d95e546a889066d28e333",
+      "function"
+    ],
+    "LighterClient::get_order_book": [
+      "13e2624c6f55bb150254f4ee867ea703c820b5941ef95f564b08cfa6237e622f",
+      "method"
+    ],
+    "PushedMessages::new": [
+      "58906177a44a49994be7ed807f2c58340514a7dfdafbc9f3ceedcac7cba43b03",
+      "method"
+    ],
+    "test_perpetual_info": [
+      "0d5caf07315c5bf50354d4443592d9b1dca7c8c9b95c97034588141890dee348",
+      "function"
+    ],
+    "OrderBook::print_orderbook": [
+      "c80f223d26119f8156bc0bdbb2b61b3312a78ec6ffac715ceb1faf96ffb51fa6",
+      "method"
+    ],
+    "Perpetual::mark_price": [
+      "274b48191e3c3122d0697b9bd8c40aa292b58081763022e36c85a45546b23a77",
+      "method"
+    ],
+    "HyperliquidClient::unsubscribe": [
+      "28a8feac24e9bb0ed6a23aa3efa3aff875066b605a3a4bdff492953389fc2f2a",
+      "method"
+    ],
+    "DispatcherConnection::new": [
+      "5ddb7d93b0ce653ee8382441b5f89788e9fb0f9149a985a3f4428bb2d80a7a8a",
+      "method"
+    ],
+    "LighterClient::get_order_book_event": [
+      "9c294f9a8cf7a02146ebf54d332ba1c81684b3be93791e2c9f6ca62749b37331",
+      "method"
+    ],
+    "AssetContext": [
+      "e0d52b0dc90fc540220b81b6057b71eb40bedbba97c7e81af608cc0463ace357",
+      "struct"
+    ],
+    "Order": [
+      "9abd7bafa61e73d16ded3c89ea3cbdbff01654d9897a17a46771d0543db08904",
+      "struct"
+    ],
+    "p1_encoder_decoder_roundtrip": [
+      "68bb4e8b017c3868b9e984be63b5fd5864071200e7338c0dcb6d28d597a8fa1f",
+      "function"
+    ],
+    "DispatcherConnection::get_push_event": [
+      "4ba7d4f77c641e1db5f37b616545a028bbc2b1fea673d0c1ad67ffa7495e2706",
+      "method"
+    ],
+    "DispatcherConnection::start": [
+      "0c825a0006e9f6f6724a6eaabf5b4be1bb67ac06bfdd6ca9bd63fea30d0b63ed",
+      "method"
+    ],
+    "DispatcherConnection::unsubscribe": [
+      "a8b718f40bbb42f50916eebff9afdac41c87a34dddb48c17dfab4b7dcd6e00b2",
+      "method"
+    ],
+    "LighterClient": [
+      "d35e3f843f0637af7706a979b5871890b8c07c425613b6f1d84b15d4c9e262a8",
+      "struct"
+    ],
+    "HyperliquidClient::get_perpetuals_for_dex": [
+      "09f87c874cf5e542bd9b4b78db42b6a09dd7242f8d9296b95872df9bce0380f7",
+      "method"
+    ],
+    "LighterClient::get_funding_rates_for_all_perpetuals": [
+      "8d7bc2b4e4e7ac07e74cacd850e18f275ffe01d6b7d1db7e423e5a6b4a16eb68",
+      "method"
+    ],
+    "LighterClient::subscribe": [
+      "c8dae5982c8af0582eee49685af1b3adbc4d935b28764c8fd36745260805ab71",
+      "method"
+    ],
+    "ProtocolFns": [
+      "e97ef1bc534a436aa5adb0bea74d9f3ad77cd01aade1c07b8e5f25e9484bef5e",
+      "struct"
+    ],
+    "PushedMessages": [
+      "58bc99d607422073bf63c1e56e59ef90374e97f8529f3983fc427f0c8c478f8b",
+      "struct"
+    ],
+    "DispatcherConnection::get_order_book_event": [
+      "315a53713872dfdfcd127bbc21a68287586c3d4c4082c95221617c01c294a487",
+      "method"
+    ],
+    "OrderBook": [
+      "809eeb5a78d4e3eb5f597d05769b48b5bab2727300a5eea65df330c7004481b4",
+      "struct"
+    ],
+    "HyperliquidClient": [
+      "16335b0622efcd5d1241ac55767552b6b5d9d64c64660ed5582ba8352f34882e",
+      "struct"
+    ],
+    "HyperliquidClient::products_version": [
+      "95d06d1af55c9b5a8ca9d54f2a42bdf2d9c0f9862a9e5274ba34354e9d738e13",
+      "method"
+    ],
+    "ConciseAnnotation": [
+      "f1fb7c26f97960adbc2e4ed61decfeefeeaa807a090b9a6443f7daf8ce3a625c",
+      "struct"
+    ],
+    "Perpetual::funding_rate_apr": [
+      "3a0e618cc7908a61ac221f7a1a7209c6796fe52d5390e1a63798d27781d541a9",
+      "method"
+    ],
+    "LighterClient::get_push_event": [
+      "afadbed5fc8d15503a75eead014cbcc41fef4e1fc23c79c4e21548f72312758e",
+      "method"
+    ],
+    "deserialize_f64_from_string": [
+      "ac9a80a2dbaf4e5f903670728b54b8ee825e1fec8b8e6b6da8e49929651b6203",
+      "function"
+    ],
+    "ProtocolFns::maybe_decompress_p1": [
+      "f69c73c4a862c8ff0fbdfab2c6610fec850db9b3510edf0c60a8a14147e17ccd",
+      "method"
+    ],
+    "DispatcherConnection::get_pushed_messages": [
+      "07c788bd664aeabe50cecac821a7e26a9dcafcf090550065388d9c2dc0e32469",
+      "method"
+    ],
+    "HyperliquidClient::get_dexs": [
+      "1f12d7982fa9a3a064a4cab9327f6478d1ecc14c2a2b6ad5eb2955029a6ce4ec",
+      "method"
+    ],
+    "InBoundMessage": [
+      "39efef01d89b637620c0cbb95eaba360d18a1068ae08050af907dc95eac900c5",
+      "struct"
+    ],
+    "MarketConfig": [
+      "1241308e5874611d4a09fc25bebe390d47ced630dfb8f997ac0eaaef8398377e",
+      "struct"
+    ],
+    "Market": [
+      "b885f0f2e2d177ad758186f9735fc910172a02b10f6bdbf845de14eecb37bebb",
+      "struct"
+    ],
+    "MarketContext": [
+      "85defbf5c020fceee4df7ba0514df257cdc61cab4724e40b67e00b2083fb34ba",
+      "struct"
+    ],
+    "ProtocolFns::protocol_1_encoder": [
+      "ba09868a9267e0d8283133c7a394d3bdfdb0ca12c8e359e4741bb3ff7e29d208",
+      "method"
+    ],
+    "DispatcherConnection": [
+      "15c5f87b10b31b67a164cb8b79d84b4b8602ebec895c35f5a5c4315dc996cc97",
+      "struct"
+    ],
+    "LighterClient::get_markets": [
+      "cd42242344e5571829c4a289428d0698c1eb7b088fd72f1f71e3e3e914987d9b",
+      "method"
+    ],
+    "LighterClient::market_info": [
+      "e773646d955067d33a3171a4954eb5146bb8992df851be52821a3630f057e019",
+      "method"
+    ],
+    "HyperliquidClient::get_order_book": [
+      "bc3a8c153f94c723a98cb0b0cbca63eddcbf223973ec8400d5305424225b6610",
+      "method"
+    ],
+    "HyperliquidClient::get_order_book_event": [
+      "95979d949c757b7e5762f1a50de0812f2c69ba229380911cb99454c91e626788",
+      "method"
+    ],
+    "deserialize_optional_f64_from_string": [
+      "068c322fd140c62a22e115d7151b06346d70e452e0324d3c8a3ba1229c898a3c",
+      "function"
+    ],
+    "PushedMessages::add_message": [
+      "0b67effdcc9d50d4692dd01c2343b4e9f371f5e17859803701b64bbb1fb7ae5f",
+      "method"
+    ],
+    "analyse_bytes_rejects_truncated_p2": [
+      "81ac9efd51fab0c7efeed4aac43a90fba4d72b268cf0d61575fefda55c701c51",
+      "function"
+    ],
+    "deserialize_u64_from_string": [
+      "bd69c93f027003ec31e462c14179ef423b8750e23efd21d21854de33cb67b33f",
+      "function"
+    ],
+    "test_get_funding_history": [
+      "dfdab9d5dcbb206986a71e456d0d04791a7db159c9d2d19848cf61d379f7ccfe",
+      "function"
+    ],
+    "test_products_version": [
+      "6835c481ffa98d370506c48bba9ceeeba71cc852be694e18bf37b415b7a672d1",
+      "function"
+    ],
+    "UnsubscriptionResponse": [
+      "a981a98acaaf5f18e13ab4f99400b7e7e3dabb08a4d75820b1d89e16ca801f97",
+      "struct"
+    ],
+    "OutBoundMessage": [
+      "116fd1fc9e3e5d1b9731afd33b4dd3d7557e54aa57a5c1e930bc4caa2af9700b",
+      "struct"
+    ],
+    "LighterClient::get_funding_history": [
+      "18605b222d19994cfbdedf2bff4cf2ac8de1a092a0786988148504591ef2f111",
+      "method"
+    ],
+    "HyperliquidClient::get_funding_rates_for_all_perpetuals": [
+      "9f569ac720f86764e9b6fff5d5df9f0f7cdae46f9acfe926d0eac4c437fb4ac4",
+      "method"
+    ],
+    "DispatcherConnection::subscribe": [
+      "86fffdc6a5cb9f3b8aefb13c144173a25187915f615352e4bccfb9ef9bfb143b",
+      "method"
+    ],
+    "PushedMessages::drain": [
+      "a0890cdd5f3695161870d597445c1cbf1c243d7b878e528947835cce385fe928",
+      "method"
+    ],
+    "build_p2_packet": [
+      "10302dda8d82557ab1eadfae1b5e574e1c98ccd50dd07d2ff76420c1708b2b04",
+      "function"
+    ],
+    "Market::is_perp": [
+      "813db1aa2a3ace9b99adcbdb438ce87036c1ec542a0854c9043191247cb299e8",
+      "method"
+    ],
+    "HyperliquidClient::connect": [
+      "ef8809ce6f3dcfe3c8e286d690c9c3ca2dda1f23be76600650686909229f6982",
+      "method"
+    ],
+    "ProtocolFns::bytes_to_orderbook": [
+      "781706726bb99e72ce47d91811b66802b788788a8797c0ef4d4d3de34994814c",
+      "method"
+    ],
+    "LighterClient::unsubscribe": [
+      "e153c8956a3934340a35643c90f149cb88362a9dcfdf09b2e39f8191b39c0f1f",
+      "method"
+    ],
+    "LighterClient::products_version": [
+      "95d06d1af55c9b5a8ca9d54f2a42bdf2d9c0f9862a9e5274ba34354e9d738e13",
+      "method"
+    ],
+    "Market::is_active": [
+      "cc33f5eefc706571d74a103b1e3b0d7486784a78c36e50fcba92ddb4bd0b5680",
+      "method"
+    ],
+    "SubscriptionResponse": [
+      "ac44292a8c7d3b6d0bba540ba3924a1cdef74b455fafe2955c52e0263a2c0e1b",
+      "struct"
+    ],
+    "HyperliquidClient::get_push_event": [
+      "afadbed5fc8d15503a75eead014cbcc41fef4e1fc23c79c4e21548f72312758e",
+      "method"
+    ],
+    "LighterClient::get_pushed_messages": [
+      "839f5a965b9397fc8f687c91286b78ea9deaecf92e8691b388cf21ea9a71dae0",
+      "method"
+    ],
+    "Dex": [
+      "39455615d208e09cbf057e31cc4e36e37a59a621ed2920855842cbe7649817b9",
+      "struct"
+    ],
+    "PerpetualInfo": [
+      "baa5542774d71dfbe22d048d43c5a0ea51d44af6c59a6c082dd3d79201f0e82e",
+      "struct"
+    ],
+    "analyse_bytes_classifies_p1_and_p2": [
+      "d2ee58e977461ca2c7e6d88cbe2072f9123c1592b35b4330bccac0a77957fbb8",
+      "function"
+    ],
+    "bytes_to_orderbook_decodes_levels_and_timestamps": [
+      "d9e6c990609c38aec60cd767e2dcb642b362fa22b9c36ba5fe91c30c81c5a4bc",
+      "function"
+    ],
+    "DispatcherConnection::request": [
+      "92c4b84b2bb30048f92c3712000cd6368bc6a170a7649918829e2be0a53ca006",
+      "method"
+    ],
+    "Perpetual": [
+      "e433a24e6d35ab852f9184c616f237c5a93036175fcae3f7ea2ea3deaf9a87a6",
+      "struct"
+    ],
+    "ProtocolFns::analyse_bytes": [
+      "d7574f703f56af6558e96de472898853f78670427f4cb01c410e6055d6ac08c0",
+      "method"
+    ],
+    "HyperliquidClient::get_pushed_messages": [
+      "839f5a965b9397fc8f687c91286b78ea9deaecf92e8691b388cf21ea9a71dae0",
+      "method"
+    ],
+    "FundingHistoryEntry": [
+      "b98fa6a9fd1926a124032d7cef179704e4ab41950c4f8a174859b24a58f36a0a",
+      "struct"
+    ],
+    "test_get_markets": [
+      "714f11e280d25576a460d36774cc775846a9a51a7de0c9d356845d28002e4569",
+      "function"
+    ],
+    "Asset::is_hip3": [
+      "46fb87dae6008e1e37bc32a7451b50268308b14064e098c5c9f30eeb9c7f1fad",
+      "method"
+    ],
+    "Annotation": [
+      "de8c37a4be87a8fac5d44bdb9ce25300ae39db28faa66db285df473c8bed7938",
+      "struct"
+    ],
+    "LighterClient::connect": [
+      "8c2c875c6b79b2921778067f16c90fa5ee108c7ba5589e104a8d9aa37ed81326",
+      "method"
+    ],
+    "test_get_funding_rates_for_all_perpetuals": [
+      "8aa6edcd57759643565570b37ad7379f5a677f9943bff11e8ad756f69688d289",
+      "function"
+    ],
+    "Perpetual::funding_rate": [
+      "0cc581723e1796454bdf065595ec353e9d9e1d7f6571b3f645fa7a0ee0f498d3",
+      "method"
+    ],
+    "test_get_dexs": [
+      "29f893d239365d9d18797afe49c2b456bc9380a85c378834e158a860fbe15235",
+      "function"
+    ]
+  },
+  "major_version": 0,
+  "minor_version": 2,
+  "patch_version": 0
+}
