@@ -1,6 +1,7 @@
 use uuid::Uuid;
 use std::io::Read;
 use serde_json::Value;
+use std::collections::HashMap;
 use flate2::read::ZlibDecoder;
 use serde::{Deserialize, Deserializer, Serialize};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
@@ -131,6 +132,22 @@ pub struct Order {
     pub quantity: f64,
 }
 
+/// A key identifying one kind of "reserved" live data attached to an [`OrderBook`] that isn't
+/// part of the order book itself (e.g. a perpetual's funding rate).
+///
+/// Used as the key of [`OrderBook::reserved`]; add a variant here (and a matching one on
+/// [`ReservedValue`]) for each new kind of out-of-band live data the dispatcher starts pushing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReservedKey {
+    FundingRate,
+}
+
+/// The typed payload for a [`ReservedKey`] entry in [`OrderBook::reserved`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReservedValue {
+    FundingRate(Option<f64>),
+}
+
 /// A point-in-time Protocol 2 order book snapshot for one symbol.
 #[derive(Debug, Clone)]
 pub struct OrderBook {
@@ -139,9 +156,33 @@ pub struct OrderBook {
     pub asks: Vec<Order>,
     pub remote_timestamp: f64,
     pub argus_timestamp: f64,
+    /// Live, non-order data pushed out-of-band by the dispatcher for this symbol (e.g. a
+    /// perpetual's funding rate, arriving as an unsolicited `funding_rate_update` Protocol 1
+    /// push rather than as part of the Protocol 2 order book stream). Prefer typed accessors
+    /// like [`OrderBook::funding_rate`] over reading this map directly.
+    ///
+    /// For the funding rate specifically, expect it within about a second of a successful
+    /// `subscribe`: the dispatcher's `_routine_push_funding_rates_for_client` (in Argus'
+    /// `argus/perpetuals/shared/__init__.py`) fires once per subscribing client right after
+    /// `subscribe` is handled, sleeping a randomized 0.1-1.0s jitter first before sending —
+    /// don't assume it lands in the very first Protocol 2 packet or two. It also arrives again
+    /// later, for every already-subscribed client, whenever the dispatcher's hourly perpetual
+    /// refresh runs (`_distribute_refreshed_perpetuals`).
+    pub reserved: HashMap<ReservedKey, ReservedValue>,
 }
 
 impl OrderBook {
+    /// The perpetual's live funding rate, if one has been received for this symbol.
+    ///
+    /// `None` both when no funding rate push has arrived yet and when the dispatcher explicitly
+    /// pushed a `null` rate. See [`OrderBook::reserved`] for when to expect the first push.
+    pub fn funding_rate(&self) -> Option<f64> {
+        match self.reserved.get(&ReservedKey::FundingRate) {
+            Some(ReservedValue::FundingRate(v)) => *v,
+            _ => None,
+        }
+    }
+
     /// Prints a formatted side-by-side view of the order book to stdout.
     ///
     /// Bids are shown on the left and asks on the right, both sorted best-first. Column widths are
@@ -518,6 +559,28 @@ impl ProtocolFns {
             asks,
             remote_timestamp,
             argus_timestamp,
+            reserved: HashMap::new(),
         }
+    }
+
+    /// Extracts the symbol and funding rate from a `funding_rate_update` Protocol 1 push's
+    /// `data` field: `{"coin": "<symbol>", "funding_rate": "<decimal>" | null}`.
+    ///
+    /// The dispatcher sends this to one client at a time, shortly (0.1-1.0s jitter) after that
+    /// client's `subscribe` is handled (Argus' `_routine_push_funding_rates_for_client`), and
+    /// again to every subscribed client on the hourly perpetual refresh
+    /// (`_distribute_refreshed_perpetuals`).
+    ///
+    /// Returns `None` if `data` has no `"coin"` string field. The funding rate is `None` if the
+    /// field is absent, `null`, or fails to parse as `f64` — a symbol with no reading is still
+    /// meaningful (nothing pushed yet), so this never panics on a malformed rate.
+    pub fn parse_funding_rate_update(data: &Value) -> Option<(String, Option<f64>)> {
+        let symbol = data.get("coin")?.as_str()?.to_string();
+        let funding_rate = match data.get("funding_rate") {
+            Some(Value::String(s)) => s.parse::<f64>().ok(),
+            Some(Value::Number(n)) => n.as_f64(),
+            _ => None,
+        };
+        Some((symbol, funding_rate))
     }
 }

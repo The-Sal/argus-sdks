@@ -9,5 +9,6 @@ pub use models::{
 };
 
 pub use argus_dispatcher_core::{
-    Event, Listener, Order, OrderBook, PushedMessages, SubscriptionResponse, UnsubscriptionResponse,
+    Event, Listener, Order, OrderBook, PushedMessages, ReservedKey, ReservedValue,
+    SubscriptionResponse, UnsubscriptionResponse,
 };

@@ -1,6 +1,6 @@
 //! Unit tests for the wire-protocol codecs. These do not need a live dispatcher.
 
-use crate::protocol::{OutBoundMessage, ProtocolFns, ProtocolKind};
+use crate::protocol::{OutBoundMessage, ProtocolFns, ProtocolKind, ReservedKey, ReservedValue};
 
 /// Builds a syntactically valid depth-`depth` Protocol 2 packet with a real best bid/ask and
 /// zero-padded remaining levels, mirroring what the dispatchers emit
@@ -71,4 +71,42 @@ fn p1_encoder_decoder_roundtrip() {
     assert_eq!(decoded.action, "subscribe");
     assert_eq!(decoded.data, crate::json!(["BTC", "ETH"]));
     assert_eq!(decoded.correlation_id, Some(msg.correlation_id));
+}
+
+#[test]
+fn parse_funding_rate_update_parses_stringified_decimal() {
+    let data = crate::json!({"coin": "BTC", "funding_rate": "0.0001125"});
+    assert_eq!(
+        ProtocolFns::parse_funding_rate_update(&data),
+        Some(("BTC".to_string(), Some(0.0001125)))
+    );
+}
+
+#[test]
+fn parse_funding_rate_update_treats_null_rate_as_none() {
+    let data = crate::json!({"coin": "ETH", "funding_rate": null});
+    assert_eq!(
+        ProtocolFns::parse_funding_rate_update(&data),
+        Some(("ETH".to_string(), None))
+    );
+}
+
+#[test]
+fn parse_funding_rate_update_rejects_missing_coin() {
+    let data = crate::json!({"funding_rate": "0.0001"});
+    assert_eq!(ProtocolFns::parse_funding_rate_update(&data), None);
+}
+
+#[test]
+fn order_book_funding_rate_reads_reserved_entry() {
+    let mut book = ProtocolFns::bytes_to_orderbook(&build_p2_packet("BTC", 10, 1.0, 2.0), None);
+    assert_eq!(book.funding_rate(), None);
+
+    book.reserved
+        .insert(ReservedKey::FundingRate, ReservedValue::FundingRate(Some(0.0001)));
+    assert_eq!(book.funding_rate(), Some(0.0001));
+
+    book.reserved
+        .insert(ReservedKey::FundingRate, ReservedValue::FundingRate(None));
+    assert_eq!(book.funding_rate(), None);
 }

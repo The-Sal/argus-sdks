@@ -24,8 +24,8 @@ use std::thread::{spawn, JoinHandle};
 use event_listener::{Event, Listener};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use crate::protocol::{
-    InBoundMessage, OrderBook, OutBoundMessage, ProtocolFns, ProtocolKind, SubscriptionResponse,
-    UnsubscriptionResponse,
+    InBoundMessage, OrderBook, OutBoundMessage, ProtocolFns, ProtocolKind, ReservedKey,
+    ReservedValue, SubscriptionResponse, UnsubscriptionResponse,
 };
 
 
@@ -105,12 +105,22 @@ impl DispatcherConnection {
     ///
     /// The returned `Arc<RwLock<HashMap<String, OrderBook>>>` is backed by the same allocation
     /// that the background processing thread writes to. Every Protocol 2 packet received from
-    /// the dispatcher overwrites the entry for that symbol in place, so a read lock taken at any
-    /// point will see the most recent snapshot available. Keys are the subscribed symbols:
-    /// Hyperliquid coins (e.g. `"BTC"`, `"xyz:AAPL"`) or Lighter symbols (e.g. `"BTC"`).
+    /// the dispatcher overwrites the bids/asks/timestamps for that symbol in place, so a read
+    /// lock taken at any point will see the most recent snapshot available. Keys are the
+    /// subscribed symbols: Hyperliquid coins (e.g. `"BTC"`, `"xyz:AAPL"`) or Lighter symbols
+    /// (e.g. `"BTC"`).
     ///
     /// Levels with no data behind them are zero-padded, so filter on `quantity > 0.0` when
     /// iterating a side.
+    ///
+    /// `OrderBook::reserved` (see [`OrderBook::funding_rate`]) is populated separately from
+    /// unsolicited `funding_rate_update` Protocol 1 pushes and is preserved across Protocol 2
+    /// updates to the same symbol, rather than being overwritten by them. An entry can exist
+    /// here with only `reserved` populated if a funding rate push arrives before the first order
+    /// book snapshot for that symbol. The dispatcher sends the first funding rate push per
+    /// subscribing client shortly (0.1-1.0s randomized jitter) after [`subscribe`](Self::subscribe)
+    /// is handled — expect it a beat or two after order book packets start flowing, not
+    /// necessarily on the very first one.
     pub fn get_order_book(&self) -> Arc<RwLock<HashMap<String, OrderBook>>> {
         self.order_books.clone()
     }
@@ -229,6 +239,28 @@ impl DispatcherConnection {
                                 .expect("Failed to lock response buffer for writing")
                                 .push(decoded);
                             response_event_handle.notify(usize::MAX);
+                        } else if decoded.action == "funding_rate_update" {
+                            if let Some((symbol, funding_rate)) =
+                                ProtocolFns::parse_funding_rate_update(&decoded.data)
+                            {
+                                let mut order_books = order_books_handle
+                                    .write()
+                                    .expect("Failed to lock order books for writing");
+                                let entry =
+                                    order_books.entry(symbol.clone()).or_insert_with(|| OrderBook {
+                                        symbol,
+                                        bids: Vec::new(),
+                                        asks: Vec::new(),
+                                        remote_timestamp: 0.0,
+                                        argus_timestamp: 0.0,
+                                        reserved: HashMap::new(),
+                                    });
+                                entry.reserved.insert(
+                                    ReservedKey::FundingRate,
+                                    ReservedValue::FundingRate(funding_rate),
+                                );
+                            }
+                            market_event_handle.notify(usize::MAX);
                         } else {
                             pushed_messages_handle
                                 .write()
@@ -238,11 +270,14 @@ impl DispatcherConnection {
                         }
                     }
                     ProtocolKind::Protocol2 => {
-                        let order_book = ProtocolFns::bytes_to_orderbook(&packet, None);
+                        let mut order_book = ProtocolFns::bytes_to_orderbook(&packet, None);
                         {
                             let mut order_books = order_books_handle
                                 .write()
                                 .expect("Failed to lock order books for writing");
+                            if let Some(existing) = order_books.get(&order_book.symbol) {
+                                order_book.reserved = existing.reserved.clone();
+                            }
                             order_books.insert(order_book.symbol.clone(), order_book);
                         }
                         market_event_handle.notify(usize::MAX);
@@ -353,7 +388,9 @@ impl DispatcherConnection {
     /// After a successful subscription the dispatcher streams Protocol 2 order book packets for
     /// these instruments; look them up in the map from [`get_order_book`](Self::get_order_book)
     /// keyed by the same instrument string, and await updates on the event from
-    /// [`get_order_book_event`](Self::get_order_book_event).
+    /// [`get_order_book_event`](Self::get_order_book_event). For each newly subscribed
+    /// instrument, the dispatcher also sends this connection its current funding rate shortly
+    /// after (0.1-1.0s randomized jitter) — see [`OrderBook::reserved`](crate::OrderBook::reserved).
     pub fn subscribe(&self, instruments: &[&str]) -> Result<SubscriptionResponse, String> {
         self.request("subscribe", serde_json::json!(instruments), None)
             .map_err(|e| format!("Failed to get subscription confirmation: {}", e))

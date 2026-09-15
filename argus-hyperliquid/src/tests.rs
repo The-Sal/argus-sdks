@@ -156,3 +156,56 @@ fn test_subscribe_and_stream_order_book() {
     );
     assert!(unsubscription.unsubscribed.iter().any(|coin| coin == "BTC"));
 }
+
+/// The dispatcher pushes each newly subscribed client its funding rate on its own, shortly after
+/// `subscribe` is handled (Argus' `_routine_push_funding_rates_for_client` sleeps a randomized
+/// 0.1-1.0s jitter, then sends) -- no manual trigger or waiting for the hourly perpetual refresh
+/// needed. 5s is a generous margin above that jitter window.
+#[test]
+#[ignore]
+fn test_funding_rate_update_delivered_within_5s() {
+    use crate::{Listener, ReservedKey};
+
+    let client = connect();
+    let subscription = client.subscribe(&["BTC"]).unwrap();
+    assert!(
+        subscription.failed.is_empty(),
+        "subscribe failed for: {:?}",
+        subscription.failed
+    );
+
+    let books = client.get_order_book();
+    let event = client.get_order_book_event();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let funding_rate = loop {
+        let listener = event.listen();
+        {
+            let snapshot = books.read().unwrap();
+            if let Some(book) = snapshot.get("BTC")
+                && book.reserved.contains_key(&ReservedKey::FundingRate)
+            {
+                break book.funding_rate();
+            }
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(
+            remaining.as_millis() > 0,
+            "timed out after 5s waiting for a BTC funding_rate_update push"
+        );
+        listener.wait_timeout(remaining);
+    };
+
+    assert!(
+        funding_rate.is_some_and(f64::is_finite),
+        "expected a finite BTC funding rate, got {:?}",
+        funding_rate
+    );
+
+    let unsubscription = client.unsubscribe(&["BTC"]).unwrap();
+    assert!(
+        unsubscription.failed.is_empty(),
+        "unsubscribe failed for: {:?}",
+        unsubscription.failed
+    );
+}
